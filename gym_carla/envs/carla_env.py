@@ -70,6 +70,7 @@ class CarlaEnv(gym.Env):
       params['continuous_steer_range'][1]]), dtype=np.float32)  # acc, steer
     observation_space_dict = {
       'camera': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
+      'semantic': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
       'lidar': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
       'birdeye': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
       'state': spaces.Box(np.array([-2, -1, -5, 0]), np.array([2, 1, 30, 1]), dtype=np.float32)
@@ -130,6 +131,18 @@ class CarlaEnv(gym.Env):
     # Set the time in seconds between sensor captures
     self.camera_bp.set_attribute('sensor_tick', '0.02')
 
+    # semantic segmentation sensor
+    self.semantic_img = np.zeros((self.obs_size, self.obs_size, 3), dtype=np.uint8)
+    self.semantic_trans = carla.Transform(carla.Location(x=0.8, z=1.7))
+    self.semantic_bp = self.world.get_blueprint_library().find('sensor.camera.semantic_segmentation')
+    # Modify the attributes of the blueprint to set image resolution and field of view.
+    self.semantic_bp.set_attribute('image_size_x', str(self.obs_size))
+    self.semantic_bp.set_attribute('image_size_y', str(self.obs_size))
+    self.semantic_bp.set_attribute('fov', '110')
+    # Set the time in seconds between sensor captures
+    self.semantic_bp.set_attribute('sensor_tick', '0.02')
+
+
     # Set fixed simulation step for synchronous mode
     self.settings = self.world.get_settings()
     self.settings.fixed_delta_seconds = self.dt
@@ -152,9 +165,11 @@ class CarlaEnv(gym.Env):
     self.collision_sensor = None
     self.lidar_sensor = None
     self.camera_sensor = None
+    self.semantic_sensor = None
 
     # Delete sensors, vehicles and walkers
-    self._clear_all_actors(['sensor.other.collision', 'sensor.lidar.ray_cast', 'sensor.camera.rgb', 'vehicle.*', 'controller.ai.walker', 'walker.*'])
+    self._clear_all_actors(['sensor.other.collision', 'sensor.lidar.ray_cast', 'sensor.camera.rgb', 
+      'sensor.camera.semantic_segmentation', 'vehicle.*', 'controller.ai.walker', 'walker.*'])
 
     # Disable sync mode
     self._set_synchronous_mode(False)
@@ -237,6 +252,19 @@ class CarlaEnv(gym.Env):
       array = array[:, :, :3]
       array = array[:, :, ::-1]
       self.camera_img = array
+
+    # Add semantic segmentation sensor
+    self.semantic_sensor = self.world.spawn_actor(self.semantic_bp, self.semantic_trans, attach_to=self.ego)
+    self.semantic_sensor.listen(lambda data: get_semantic_data(data))
+    cc = carla.ColorConverter.CityScapesPalette       # conversion from semantic encoding to RGB
+    # camera.listen(lambda image: image.save_to_disk('output.png', cc))  
+    def get_semantic_data(data):
+      data.convert(cc)
+      array = np.frombuffer(data.raw_data, dtype = np.dtype("uint8"))  # data variable is of type carla.Image
+      array = np.reshape(array, (data.height, data.width, 4))
+      array = array[:, :, :3]
+      array = array[:, :, ::-1]
+      self.semantic_img = array
 
     # Update timesteps
     self.time_step=0
@@ -334,7 +362,7 @@ class CarlaEnv(gym.Env):
     """
     pygame.init()
     self.display = pygame.display.set_mode(
-    (self.display_size * 3, self.display_size),
+    (self.display_size * 4, self.display_size),
     pygame.HWSURFACE | pygame.DOUBLEBUF)
 
     pixels_per_meter = self.display_size / self.obs_range
@@ -527,6 +555,11 @@ class CarlaEnv(gym.Env):
     camera_surface = rgb_to_display_surface(camera, self.display_size)
     self.display.blit(camera_surface, (self.display_size * 2, 0))
 
+    ## Display semantic image
+    semantic = resize(self.semantic_img, (self.obs_size, self.obs_size)) * 255
+    semantic_surface = rgb_to_display_surface(semantic, self.display_size)
+    self.display.blit(semantic_surface, (self.display_size * 3, 0))
+
     # Display on pygame
     pygame.display.flip()
 
@@ -540,7 +573,16 @@ class CarlaEnv(gym.Env):
       np.array(np.array([np.cos(ego_yaw), np.sin(ego_yaw)]))))
     v = self.ego.get_velocity()
     speed = np.sqrt(v.x**2 + v.y**2)
-    state = np.array([lateral_dis, - delta_yaw, speed, self.vehicle_front])
+    # state = np.array([lateral_dis, - delta_yaw, speed, self.vehicle_front])
+    ########################################################################
+    ### changing the state:
+    ########################################################################
+    dis, w = get_lane_dis(self.waypoints, ego_x, ego_y)
+    lspeed = np.array([v.x, v.y]) # longitudinal speed
+    lspeed_lon = np.dot(lspeed, w)
+    
+    state = np.array([self.ego.get_control().steer, -delta_yaw, lspeed_lon, speed])
+
 
     if self.pixor:
       ## Vehicle classification and regression maps (requires further normalization)
@@ -580,6 +622,7 @@ class CarlaEnv(gym.Env):
 
     obs = {
       'camera':camera.astype(np.uint8),
+      'semantic':semantic.astype(np.uint8),
       'lidar':lidar.astype(np.uint8),
       'birdeye':birdeye.astype(np.uint8),
       'state': state,
@@ -629,8 +672,20 @@ class CarlaEnv(gym.Env):
     # cost for lateral acceleration
     r_lat = - abs(self.ego.get_control().steer) * lspeed_lon**2
 
-    r = 200*r_collision + 1*lspeed_lon + 10*r_fast + 1*r_out + r_steer*5 + 0.2*r_lat - 0.1
+    # r = 200*r_collision + 1*lspeed_lon + 10*r_fast + 1*r_out + r_steer*5 + 0.2*r_lat - 0.1
+    ########################################################################
+    ### changing reward function:
+    ########################################################################
+    ego_trans = self.ego.get_transform()
+    ego_yaw = ego_trans.rotation.yaw/180*np.pi
+    delta_yaw = np.arcsin(np.cross(w, 
+      np.array(np.array([np.cos(ego_yaw), np.sin(ego_yaw)]))))
+    r_deltaYaw = -delta_yaw**2
+    # print(-delta_yaw)
+    # r = 200*r_collision + 1*lspeed_lon + 10*r_fast + 1*r_out + r_steer*5 + 0.2*r_lat - 0.1 + 10*r_deltaYaw
 
+
+    r = 200*r_collision + 1*lspeed_lon + 1.5*r_fast*lspeed_lon + 40*r_out + r_steer*5 + 0.2*r_lat - 0.1
     return r
 
   def _terminal(self):
