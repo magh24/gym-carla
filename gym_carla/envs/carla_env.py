@@ -122,7 +122,7 @@ class CarlaEnv(gym.Env):
 
     # Camera sensor
     self.camera_img = np.zeros((self.obs_size, self.obs_size, 3), dtype=np.uint8)
-    self.camera_trans = carla.Transform(carla.Location(x=0.8, z=1.7))
+    self.camera_trans = carla.Transform(carla.Location(x=1.5, z=1.7))
     self.camera_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')
     # Modify the attributes of the blueprint to set image resolution and field of view.
     self.camera_bp.set_attribute('image_size_x', str(self.obs_size))
@@ -133,7 +133,7 @@ class CarlaEnv(gym.Env):
 
     # semantic segmentation sensor
     self.semantic_img = np.zeros((self.obs_size, self.obs_size, 3), dtype=np.uint8)
-    self.semantic_trans = carla.Transform(carla.Location(x=0.8, z=1.7))
+    self.semantic_trans = carla.Transform(carla.Location(x=1.5, z=1.7))
     self.semantic_bp = self.world.get_blueprint_library().find('sensor.camera.semantic_segmentation')
     # Modify the attributes of the blueprint to set image resolution and field of view.
     self.semantic_bp.set_attribute('image_size_x', str(self.obs_size))
@@ -279,6 +279,8 @@ class CarlaEnv(gym.Env):
 
     # Set ego information for render
     self.birdeye_render.set_hero(self.ego, self.ego.id)
+    # set autopilot 
+    self.ego.set_autopilot(enabled=True)
 
     return self._get_obs()
   
@@ -300,8 +302,13 @@ class CarlaEnv(gym.Env):
       brake = np.clip(-acc/8,0,1)
 
     # Apply control
-    act = carla.VehicleControl(throttle=float(throttle), steer=float(-steer), brake=float(brake))
-    self.ego.apply_control(act)
+    # act = carla.VehicleControl(throttle=float(throttle), steer=float(-steer), brake=float(brake))
+    # self.ego.apply_control(act)
+
+    # if want to read control in autopilot mode
+    # cont = self.ego.get_control()
+    # print(cont.throttle, cont.steer)
+
 
     self.world.tick()
 
@@ -697,20 +704,22 @@ class CarlaEnv(gym.Env):
     if len(self.collision_hist)>0: 
       return True
 
+    # If autopilot is used no need to terminate episodes
+
     # If reach maximum timestep
-    if self.time_step>self.max_time_episode:
-      return True
+    # if self.time_step>self.max_time_episode:
+    #   return True
 
     # If at destination
-    if self.dests is not None: # If at destination
-      for dest in self.dests:
-        if np.sqrt((ego_x-dest[0])**2+(ego_y-dest[1])**2)<4:
-          return True
+    # if self.dests is not None: # If at destination
+    #   for dest in self.dests:
+    #     if np.sqrt((ego_x-dest[0])**2+(ego_y-dest[1])**2)<4:
+    #       return True
 
     # If out of lane
-    dis, _ = get_lane_dis(self.waypoints, ego_x, ego_y)
-    if abs(dis) > self.out_lane_thres:
-      return True
+    # dis, _ = get_lane_dis(self.waypoints, ego_x, ego_y)
+    # if abs(dis) > self.out_lane_thres:
+    #   return True
 
     return False
 
