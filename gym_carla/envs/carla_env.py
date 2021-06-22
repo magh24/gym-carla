@@ -27,6 +27,7 @@ from gym_carla.envs.render import BirdeyeRender
 from gym_carla.envs.route_planner import RoutePlanner
 from gym_carla.envs.misc import *
 
+import cv2
 
 class CarlaEnv(gym.Env):
   """An OpenAI gym wrapper for CARLA simulator."""
@@ -392,9 +393,22 @@ class CarlaEnv(gym.Env):
     # Save camera image
     if 'camera' in obs:
       path_save_camera = os.path.join(path_save, f"cam_front")
+      path_save_camera_resized = os.path.join(path_save, f"cam_front_resized_128")
+
       if not os.path.exists(path_save_camera):
         os.mkdir(path_save_camera)
+
+      if not os.path.exists(path_save_camera_resized):
+        os.mkdir(path_save_camera_resized)
+      
+      
       imsave(os.path.join(path_save_camera, f"{ts}.png"), obs["camera"])
+
+      # Temp workaround
+      image = cv2.imread(os.path.join(path_save_camera, f"{ts}.png"))
+      image = cv2.resize(image, (128, 128), interpolation=cv2.INTER_NEAREST)
+
+      cv2.imwrite(os.path.join(path_save_camera_resized, f"{ts}.png"), image)
 
     # Save semseg camera image
     if 'semantic' in obs:
