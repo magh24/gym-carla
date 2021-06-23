@@ -31,7 +31,7 @@ def main():
     'port': 2000,  # connection port
     'town': 'Town03',  # which town to simulate
     'task_mode': 'random',  # mode of the task, [random, roundabout (only for Town03)]
-    'max_time_episode': 100,  # maximum timesteps per episode
+    'max_time_episode': 1000,  # maximum timesteps per episode
     'max_waypt': 12,  # maximum number of waypoints
     'obs_range': 32,  # observation range (meter)
     'lidar_bin': 0.125,  # bin size of lidar sensor (meter)
@@ -53,11 +53,10 @@ def main():
 
 
   cnt = 0
-  if not os.path.exists('data/'):
-    os.makedirs('data/')
-  if not os.path.exists('2nd_data/'):
-    os.makedirs('2nd_data/')
-
+  keys = ['camera', 'camera_l', 'camera_r', 'semantic']
+  for key in keys:
+    if not os.path.exists('data/' + key):
+      os.makedirs('data/'+key)
 
   while True:
     action = [2.0, 0.0]
@@ -67,22 +66,13 @@ def main():
 
     ### saving the data
     cnt += 1
-    name = os.path.join("data/", str(cnt))
-
-    im = Image.fromarray(obs['camera'])
-    im.save(name + "_camera.jpeg")
-    im = Image.fromarray(obs['semantic'])
-    im.save(name + "_semantic.jpeg")
-    
-    im = Image.fromarray(obs['lidar'])
-    im.save("2nd_" + name + "_lidar.jpeg")
-    im = Image.fromarray(obs['birdeye'])
-    im.save("2nd_" + name + "_birdeye.jpeg")
+    for key in keys:
+      im = Image.fromarray(obs[key])
+      im.save(os.path.join("data/", key, str(cnt)) + ".jpeg")
 
     # states are
     # aux_state: throttle, steer, brake, trafficlight
     # state: current_steer, desired_steer, speed_long, speed
-
     with open('data/state.csv','a') as f:
       writer = csv.writer(f)
       state_data = np.concatenate((obs['state'], obs['aux_state']))
