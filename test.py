@@ -9,6 +9,11 @@ import gym
 import gym_carla
 import carla
 
+from PIL import Image
+import os
+import csv
+import numpy as np   
+
 def main():
   # parameters for the gym_carla environment
   params = {
@@ -26,7 +31,7 @@ def main():
     'port': 2000,  # connection port
     'town': 'Town03',  # which town to simulate
     'task_mode': 'random',  # mode of the task, [random, roundabout (only for Town03)]
-    'max_time_episode': 1000,  # maximum timesteps per episode
+    'max_time_episode': 100,  # maximum timesteps per episode
     'max_waypt': 12,  # maximum number of waypoints
     'obs_range': 32,  # observation range (meter)
     'lidar_bin': 0.125,  # bin size of lidar sensor (meter)
@@ -39,17 +44,58 @@ def main():
     'pixor': False,  # whether to output PIXOR observation
   }
 
+
   # Set gym-carla environment
   env = gym.make('carla-v0', params=params)
   obs = env.reset()
+  for _ in range(15):  # wait for zoom
+    env.step([2.0, 0.0])
+
+
+  cnt = 0
+  if not os.path.exists('data/'):
+    os.makedirs('data/')
+  if not os.path.exists('2nd_data/'):
+    os.makedirs('2nd_data/')
+
 
   while True:
     action = [2.0, 0.0]
     obs,r,done,info = env.step(action)
+    print(cnt, '-', obs['aux_state'], obs['state'])
+
+
+    ### saving the data
+    cnt += 1
+    name = os.path.join("data/", str(cnt))
+
+    im = Image.fromarray(obs['camera'])
+    im.save(name + "_camera.jpeg")
+    im = Image.fromarray(obs['semantic'])
+    im.save(name + "_semantic.jpeg")
+    
+    im = Image.fromarray(obs['lidar'])
+    im.save("2nd_" + name + "_lidar.jpeg")
+    im = Image.fromarray(obs['birdeye'])
+    im.save("2nd_" + name + "_birdeye.jpeg")
+
+    # states are
+    # aux_state: throttle, steer, brake, trafficlight
+    # state: current_steer, desired_steer, speed_long, speed
+
+    with open('data/state.csv','a') as f:
+      writer = csv.writer(f)
+      state_data = np.concatenate((obs['state'], obs['aux_state']))
+      writer.writerow(state_data)
 
     if done:
       obs = env.reset()
+      for _ in range(15):
+        env.step(action)
+
+
 
 
 if __name__ == '__main__':
+  np.set_printoptions(precision=3)
   main()

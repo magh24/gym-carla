@@ -161,7 +161,7 @@ class CarlaEnv(gym.Env):
       self.pixel_grid = np.vstack((x, y)).T
 
   def reset(self):
-    # Clear sensor objects  
+    # Clear sensor objects
     self.collision_sensor = None
     self.lidar_sensor = None
     self.camera_sensor = None
@@ -283,6 +283,33 @@ class CarlaEnv(gym.Env):
     self.ego.set_autopilot(enabled=True)
 
     return self._get_obs()
+
+  def detectTrafficLight(self):
+    '''
+    Detect the traffic light state when it is within a certain distance
+    '''
+    lights_list = self.world.get_actors().filter('traffic.traffic_light')
+    sel_traffic_light = None
+    min_angle = 180.0
+   
+    for traffic_light in lights_list:
+        loc = traffic_light.get_location()
+        magnitude, angle = compute_magnitude_angle(
+            loc, self.ego.get_location(), self.ego.get_transform().rotation.yaw
+        )
+        if magnitude < 45.0 and angle < min(25.0, min_angle):
+            sel_traffic_light = traffic_light
+            min_angle = angle
+
+    if sel_traffic_light is not None:
+        if sel_traffic_light.state == carla.libcarla.TrafficLightState.Red:
+          print('state', sel_traffic_light.state)
+          return 0
+        if sel_traffic_light.state == carla.libcarla.TrafficLightState.Green:
+          print('state', sel_traffic_light.state)
+          return 1
+    return 2  # no light
+
   
   def step(self, action):
     # Calculate acceleration and steering
@@ -304,11 +331,6 @@ class CarlaEnv(gym.Env):
     # Apply control
     # act = carla.VehicleControl(throttle=float(throttle), steer=float(-steer), brake=float(brake))
     # self.ego.apply_control(act)
-
-    # if want to read control in autopilot mode
-    # cont = self.ego.get_control()
-    # print(cont.throttle, cont.steer)
-
 
     self.world.tick()
 
@@ -369,7 +391,7 @@ class CarlaEnv(gym.Env):
     """
     pygame.init()
     self.display = pygame.display.set_mode(
-    (self.display_size * 4, self.display_size),
+    (self.display_size * 3, self.display_size),
     pygame.HWSURFACE | pygame.DOUBLEBUF)
 
     pixels_per_meter = self.display_size / self.obs_range
@@ -564,8 +586,8 @@ class CarlaEnv(gym.Env):
 
     ## Display semantic image
     semantic = resize(self.semantic_img, (self.obs_size, self.obs_size)) * 255
-    semantic_surface = rgb_to_display_surface(semantic, self.display_size)
-    self.display.blit(semantic_surface, (self.display_size * 3, 0))
+    # semantic_surface = rgb_to_display_surface(semantic, self.display_size)
+    # self.display.blit(semantic_surface, (self.display_size * 3, 0))
 
     # Display on pygame
     pygame.display.flip()
@@ -627,12 +649,19 @@ class CarlaEnv(gym.Env):
       # Pixor state, [x, y, cos(yaw), sin(yaw), speed]
       pixor_state = [ego_x, ego_y, np.cos(ego_yaw), np.sin(ego_yaw), speed]
 
+
+    trafficlight = self.detectTrafficLight()
+    # if want to read control in autopilot mode
+    cont = self.ego.get_control()
+    aux_state = np.array([cont.throttle, cont.steer, cont.brake, trafficlight])
+
     obs = {
       'camera':camera.astype(np.uint8),
       'semantic':semantic.astype(np.uint8),
       'lidar':lidar.astype(np.uint8),
       'birdeye':birdeye.astype(np.uint8),
       'state': state,
+      'aux_state': aux_state
     }
 
     if self.pixor:
@@ -707,8 +736,8 @@ class CarlaEnv(gym.Env):
     # If autopilot is used no need to terminate episodes
 
     # If reach maximum timestep
-    # if self.time_step>self.max_time_episode:
-    #   return True
+    if self.time_step>self.max_time_episode:
+      return True
 
     # If at destination
     # if self.dests is not None: # If at destination
@@ -730,4 +759,6 @@ class CarlaEnv(gym.Env):
         if actor.is_alive:
           if actor.type_id == 'controller.ai.walker':
             actor.stop()
+          if actor.type_id == 'sensor.camera.rgb':
+             actor.stop()
           actor.destroy()
