@@ -14,6 +14,11 @@ import gym
 import gym_carla
 import carla
 
+from PIL import Image
+import os
+import csv
+import numpy as np   
+
 def main():
 
   parser = argparse.ArgumentParser(description="Autoencoder training.")
@@ -52,33 +57,48 @@ def main():
     #'folder': "/mnt/storage2/carla-test-1/Log1"
   }
 
-  params['folder'] = os.path.join(args.path, args.folder)
-
-  
-
-  folders = [f"Log{s}" for s in np.arange(75,101)]
-
-  if not os.path.exists(args.path):
-    os.mkdir(args.path)
-
-  log_idx = 0
-  params['folder'] = os.path.join(args.path, folders[log_idx])
-  print(params['folder'])
 
   # Set gym-carla environment
   env = gym.make('carla-v0', params=params)
   obs = env.reset()
+  for _ in range(15):  # wait for zoom
+    env.step([2.0, 0.0])
+
+
+  cnt = 0
+  keys = ['camera', 'camera_l', 'camera_r', 'semantic']
+  for key in keys:
+    if not os.path.exists('data/' + key):
+      os.makedirs('data/'+key)
 
   while True:
     action = [2.0, 0.0]
     obs,r,done,info = env.step(action)
+    print(cnt, '-', obs['aux_state'], obs['state'])
+
+
+    ### saving the data
+    cnt += 1
+    for key in keys:
+      im = Image.fromarray(obs[key])
+      im.save(os.path.join("data/", key, str(cnt)) + ".jpeg")
+
+    # states are
+    # aux_state: throttle, steer, brake, trafficlight
+    # state: current_steer, desired_steer, speed_long, speed
+    with open('data/state.csv','a') as f:
+      writer = csv.writer(f)
+      state_data = np.concatenate((obs['state'], obs['aux_state']))
+      writer.writerow(state_data)
 
     if done:
       obs = env.reset()
-      log_idx += 1
-      folder = os.path.join(args.path, folders[log_idx])
-      env.set_folder(folder)
-      print(folder)
+      for _ in range(15):
+        env.step(action)
+
+
+
 
 if __name__ == '__main__':
+  np.set_printoptions(precision=3)
   main()

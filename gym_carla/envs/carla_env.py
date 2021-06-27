@@ -127,15 +127,37 @@ class CarlaEnv(gym.Env):
     self.lidar_bp.set_attribute('range', '5000')
 
     # Camera sensor
-    self.camera_img = np.zeros((self.obs_size, self.obs_size, 3), dtype=np.uint8)
-    self.camera_trans = carla.Transform(carla.Location(x=1.5, z=1.7))
-    self.camera_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')
-    # Modify the attributes of the blueprint to set image resolution and field of view.
-    self.camera_bp.set_attribute('image_size_x', str(self.obs_size))
-    self.camera_bp.set_attribute('image_size_y', str(self.obs_size))
-    self.camera_bp.set_attribute('fov', '110')
-    # Set the time in seconds between sensor captures
-    self.camera_bp.set_attribute('sensor_tick', '0.02')
+    # self.camera_img = np.zeros((self.obs_size, self.obs_size, 3), dtype=np.uint8)
+    # self.camera_trans = carla.Transform(carla.Location(x=1.5, z=1.7))
+    # self.camera_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')
+    # # Modify the attributes of the blueprint to set image resolution and field of view.
+    # self.camera_bp.set_attribute('image_size_x', str(self.obs_size))
+    # self.camera_bp.set_attribute('image_size_y', str(self.obs_size))
+    # self.camera_bp.set_attribute('fov', '110')
+    # # Set the time in seconds between sensor captures
+    # self.camera_bp.set_attribute('sensor_tick', '0.02')
+
+    ### additional cameras
+    self.numCameras = 3
+    self.camera_trans_lis = [None] * self.numCameras 
+    self.camera_bp_lis = [None] * self.numCameras 
+    self.camera_img_lis = [None] * self.numCameras 
+    transform_vals = [carla.Transform(carla.Location(x=1.5, z=1.7), carla.Rotation(yaw=0.0)),
+    carla.Transform(carla.Location(x=.60, y=-.89, z=.65), carla.Rotation(yaw= -60.0)),
+    carla.Transform(carla.Location(x=.60, y=.89, z=.65), carla.Rotation(yaw= 60.0))]
+    for i in range(self.numCameras ):
+      self.camera_img_lis[i] = np.zeros((self.obs_size, self.obs_size, 3), dtype=np.uint8)
+      self.camera_trans_lis[i] = transform_vals[i]
+      self.camera_bp_lis[i] = self.world.get_blueprint_library().find('sensor.camera.rgb')
+      # Modify the attributes of the blueprint to set image resolution and field of view.
+      self.camera_bp_lis[i].set_attribute('image_size_x', str(self.obs_size))
+      self.camera_bp_lis[i].set_attribute('image_size_y', str(self.obs_size))
+      self.camera_bp_lis[i].set_attribute('fov', '110')
+      # Set the time in seconds between sensor captures
+      self.camera_bp_lis[i].set_attribute('sensor_tick', '0.02')
+
+
+
 
     # semantic segmentation sensor
     self.semantic_img = np.zeros((self.obs_size, self.obs_size, 3), dtype=np.uint8)
@@ -176,10 +198,10 @@ class CarlaEnv(gym.Env):
     self.folder = folder
 
   def reset(self):
-    # Clear sensor objects  
+    # Clear sensor objects
     self.collision_sensor = None
     self.lidar_sensor = None
-    self.camera_sensor = None
+    self.camera_sensor_lis = [None] * self.numCameras 
     self.semantic_sensor = None
 
     # Delete sensors, vehicles and walkers
@@ -259,14 +281,30 @@ class CarlaEnv(gym.Env):
       self.lidar_data = data
 
     # Add camera sensor
-    self.camera_sensor = self.world.spawn_actor(self.camera_bp, self.camera_trans, attach_to=self.ego)
-    self.camera_sensor.listen(lambda data: get_camera_img(data))
-    def get_camera_img(data):
-      array = np.frombuffer(data.raw_data, dtype = np.dtype("uint8"))
-      array = np.reshape(array, (data.height, data.width, 4))
-      array = array[:, :, :3]
-      array = array[:, :, ::-1]
-      self.camera_img = array
+    for i in range(self.numCameras):
+      self.camera_sensor_lis[i] = self.world.spawn_actor(self.camera_bp_lis[i], self.camera_trans_lis[i], attach_to=self.ego)
+      if i==0:
+        self.camera_sensor_lis[i].listen(lambda data: get_camera_img(data))
+      if i==1:
+        self.camera_sensor_lis[i].listen(lambda data: get_camera_img1(data))
+      if i==2:
+        self.camera_sensor_lis[i].listen(lambda data: get_camera_img2(data))
+      
+      def process_img_data(data):
+        array = np.frombuffer(data.raw_data, dtype = np.dtype("uint8"))
+        array = np.reshape(array, (data.height, data.width, 4))
+        array = array[:, :, :3]
+        array = array[:, :, ::-1]
+        return array
+      
+      def get_camera_img(data):
+        self.camera_img_lis[0] = process_img_data(data)
+      
+      def get_camera_img1(data):
+        self.camera_img_lis[1] = process_img_data(data)
+
+      def get_camera_img2(data):
+        self.camera_img_lis[2] = process_img_data(data)
 
     # Add semantic segmentation sensor
     self.semantic_sensor = self.world.spawn_actor(self.semantic_bp, self.semantic_trans, attach_to=self.ego)
@@ -275,42 +313,9 @@ class CarlaEnv(gym.Env):
     # camera.listen(lambda image: image.save_to_disk('output.png', cc))  
     def get_semantic_data(data):
       data.convert(cc)
-      array = np.frombuffer(data.raw_data, dtype = np.dtype("uint8"))  # data variable is of type carla.Image
-      array = np.reshape(array, (data.height, data.width, 4))
-      array = array[:, :, :3]
-      array = array[:, :, ::-1]
-      self.semantic_img = array
+      self.semantic_img =  process_img_data(data)
 
-    # Add IMU sensor
-    self.imu_sensor = self.world.spawn_actor(
-      self.imu_bp,
-      self.imu_transform,
-      attach_to=self.ego, 
-      attachment_type=carla.AttachmentType.Rigid)
-    
-    self.imu_sensor.listen(lambda data: get_imu_data(data))
-
-    def get_imu_data(data):
-      self.imu_data = {
-        "accelerometer.x": data.accelerometer.x, 
-        "accelerometer.y": data.accelerometer.y, 
-        "accelerometer.z": data.accelerometer.z, 
-        "gyroscope.x": data.gyroscope.x,
-        "gyroscope.y": data.gyroscope.y,
-        "gyroscope.z": data.gyroscope.z,
-        "compass": data.compass
-      }
-      # self.imu_data = np.array([
-      #   data.accelerometer.x, 
-      #   data.accelerometer.y, 
-      #   data.accelerometer.z, 
-      #   data.gyroscope.x,
-      #   data.gyroscope.y,
-      #   data.gyroscope.z,
-      #   data.compass])
-    
-
-    # Update timesteps
+    # Update timesteps3
     self.time_step=0
     self.reset_step+=1
 
@@ -327,6 +332,33 @@ class CarlaEnv(gym.Env):
     self.ego.set_autopilot(enabled=True)
 
     return self._get_obs()
+
+  def detectTrafficLight(self):
+    '''
+    Detect the traffic light state when it is within a certain distance
+    '''
+    lights_list = self.world.get_actors().filter('traffic.traffic_light')
+    sel_traffic_light = None
+    min_angle = 180.0
+   
+    for traffic_light in lights_list:
+        loc = traffic_light.get_location()
+        magnitude, angle = compute_magnitude_angle(
+            loc, self.ego.get_location(), self.ego.get_transform().rotation.yaw
+        )
+        if magnitude < 45.0 and angle < min(25.0, min_angle):
+            sel_traffic_light = traffic_light
+            min_angle = angle
+
+    if sel_traffic_light is not None:
+        if sel_traffic_light.state == carla.libcarla.TrafficLightState.Red:
+          print('state', sel_traffic_light.state)
+          return 0
+        if sel_traffic_light.state == carla.libcarla.TrafficLightState.Green:
+          print('state', sel_traffic_light.state)
+          return 1
+    return 2  # no light
+
   
   def step(self, action):
     # Calculate acceleration and steering
@@ -348,11 +380,6 @@ class CarlaEnv(gym.Env):
     # Apply control
     # act = carla.VehicleControl(throttle=float(throttle), steer=float(-steer), brake=float(brake))
     # self.ego.apply_control(act)
-
-    # if want to read control in autopilot mode
-    # cont = self.ego.get_control()
-    # print(cont.throttle, cont.steer)
-
 
     self.world.tick()
 
@@ -486,7 +513,7 @@ class CarlaEnv(gym.Env):
     """
     pygame.init()
     self.display = pygame.display.set_mode(
-    (self.display_size * 4, self.display_size),
+    (self.display_size * 3, self.display_size),
     pygame.HWSURFACE | pygame.DOUBLEBUF)
 
     pixels_per_meter = self.display_size / self.obs_range
@@ -639,7 +666,7 @@ class CarlaEnv(gym.Env):
 
     # Display birdeye image
     birdeye_surface = rgb_to_display_surface(birdeye, self.display_size)
-    self.display.blit(birdeye_surface, (0, 0))
+    # self.display.blit(birdeye_surface, (0, 0))
 
     ## Lidar image generation
     point_cloud = []
@@ -672,17 +699,25 @@ class CarlaEnv(gym.Env):
 
     # Display lidar image
     lidar_surface = rgb_to_display_surface(lidar, self.display_size)
-    self.display.blit(lidar_surface, (self.display_size, 0))
+    # self.display.blit(lidar_surface, (self.display_size, 0))
 
     ## Display camera image
-    camera = resize(self.camera_img, (self.obs_size, self.obs_size)) * 255
+    camera = resize(self.camera_img_lis[0], (self.obs_size, self.obs_size)) * 255
     camera_surface = rgb_to_display_surface(camera, self.display_size)
+    self.display.blit(camera_surface, (self.display_size * 1, 0))
+
+    camera1 = resize(self.camera_img_lis[1], (self.obs_size, self.obs_size)) * 255
+    camera_surface = rgb_to_display_surface(camera1, self.display_size)
+    self.display.blit(camera_surface, (self.display_size * 0, 0))
+
+    camera2 = resize(self.camera_img_lis[2], (self.obs_size, self.obs_size)) * 255
+    camera_surface = rgb_to_display_surface(camera2, self.display_size)
     self.display.blit(camera_surface, (self.display_size * 2, 0))
 
     ## Display semantic image
     semantic = resize(self.semantic_img, (self.obs_size, self.obs_size)) * 255
-    semantic_surface = rgb_to_display_surface(semantic, self.display_size)
-    self.display.blit(semantic_surface, (self.display_size * 3, 0))
+    # semantic_surface = rgb_to_display_surface(semantic, self.display_size)
+    # self.display.blit(semantic_surface, (self.display_size * 3, 0))
 
     # Display on pygame
     pygame.display.flip()
@@ -744,15 +779,21 @@ class CarlaEnv(gym.Env):
       # Pixor state, [x, y, cos(yaw), sin(yaw), speed]
       pixor_state = [ego_x, ego_y, np.cos(ego_yaw), np.sin(ego_yaw), speed]
 
-    imu = self.imu_data
+
+    trafficlight = self.detectTrafficLight()
+    # if want to read control in autopilot mode
+    cont = self.ego.get_control()
+    aux_state = np.array([cont.throttle, cont.steer, cont.brake, trafficlight])
 
     obs = {
       'camera':camera.astype(np.uint8),
+      'camera_l': (resize(self.camera_img_lis[1], (self.obs_size, self.obs_size)) * 255).astype(np.uint8),
+      'camera_r': (resize(self.camera_img_lis[2], (self.obs_size, self.obs_size)) * 255).astype(np.uint8),
       'semantic':semantic.astype(np.uint8),
       'lidar':lidar.astype(np.uint8),
       'birdeye':birdeye.astype(np.uint8),
       'state': state,
-      'imu': imu
+      'aux_state': aux_state
     }
 
     if self.pixor:
@@ -827,7 +868,7 @@ class CarlaEnv(gym.Env):
     # If autopilot is used no need to terminate episodes
 
     # If reach maximum timestep
-    if self.time_step>=self.max_time_episode:
+    if self.time_step>self.max_time_episode:
       return True
 
     # If at destination
