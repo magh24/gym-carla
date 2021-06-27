@@ -172,6 +172,9 @@ class CarlaEnv(gym.Env):
       x, y = x.flatten(), y.flatten()
       self.pixel_grid = np.vstack((x, y)).T
 
+  def set_folder(self, folder:str)->None:
+    self.folder = folder
+
   def reset(self):
     # Clear sensor objects  
     self.collision_sensor = None
@@ -824,8 +827,8 @@ class CarlaEnv(gym.Env):
     # If autopilot is used no need to terminate episodes
 
     # If reach maximum timestep
-    # if self.time_step>self.max_time_episode:
-    #   return True
+    if self.time_step>=self.max_time_episode:
+      return True
 
     # If at destination
     # if self.dests is not None: # If at destination
