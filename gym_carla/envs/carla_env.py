@@ -6,17 +6,13 @@
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
 from __future__ import division
-from ast import dump
 
-import os
 import copy
 import numpy as np
 import pygame
 import random
 import time
-import json
 from skimage.transform import resize
-from skimage.io import imsave
 
 import gym
 from gym import spaces
@@ -27,7 +23,6 @@ from gym_carla.envs.render import BirdeyeRender
 from gym_carla.envs.route_planner import RoutePlanner
 from gym_carla.envs.misc import *
 
-import cv2
 
 class CarlaEnv(gym.Env):
   """An OpenAI gym wrapper for CARLA simulator."""
@@ -55,7 +50,6 @@ class CarlaEnv(gym.Env):
       self.pixor_size = params['pixor_size']
     else:
       self.pixor = False
-    self.folder = params['folder']
 
     # Destination
     if params['task_mode'] == 'roundabout':
@@ -138,13 +132,16 @@ class CarlaEnv(gym.Env):
     # self.camera_bp.set_attribute('sensor_tick', '0.02')
 
     ### additional cameras
-    self.numCameras = 3
+    self.numCameras = 4
     self.camera_trans_lis = [None] * self.numCameras 
     self.camera_bp_lis = [None] * self.numCameras 
     self.camera_img_lis = [None] * self.numCameras 
-    transform_vals = [carla.Transform(carla.Location(x=1.5, z=1.7), carla.Rotation(yaw=0.0)),
-    carla.Transform(carla.Location(x=.60, y=-.89, z=.65), carla.Rotation(yaw= -60.0)),
-    carla.Transform(carla.Location(x=.60, y=.89, z=.65), carla.Rotation(yaw= 60.0))]
+    transform_vals = [
+      carla.Transform(carla.Location(x=1.6, z=1.7), carla.Rotation(yaw=0.0)),
+      carla.Transform(carla.Location(x=.60, y=-.89, z=1.7), carla.Rotation(yaw=-90.0)),
+      carla.Transform(carla.Location(x=.60, y=.89, z=1.7), carla.Rotation(yaw=90.0)),
+      carla.Transform(carla.Location(x=-1.9, z=1.7), carla.Rotation(yaw=180.0))
+    ]
     for i in range(self.numCameras ):
       self.camera_img_lis[i] = np.zeros((self.obs_size, self.obs_size, 3), dtype=np.uint8)
       self.camera_trans_lis[i] = transform_vals[i]
@@ -156,9 +153,6 @@ class CarlaEnv(gym.Env):
       # Set the time in seconds between sensor captures
       self.camera_bp_lis[i].set_attribute('sensor_tick', '0.02')
 
-
-
-
     # semantic segmentation sensor
     self.semantic_img = np.zeros((self.obs_size, self.obs_size, 3), dtype=np.uint8)
     self.semantic_trans = carla.Transform(carla.Location(x=1.5, z=1.7))
@@ -169,7 +163,6 @@ class CarlaEnv(gym.Env):
     self.semantic_bp.set_attribute('fov', '110')
     # Set the time in seconds between sensor captures
     self.semantic_bp.set_attribute('sensor_tick', '0.02')
-    
 
     # IMU sensor
     self.imu_data = np.zeros((7))
@@ -193,9 +186,6 @@ class CarlaEnv(gym.Env):
       x, y = np.meshgrid(np.arange(self.pixor_size), np.arange(self.pixor_size)) # make a canvas with coordinates
       x, y = x.flatten(), y.flatten()
       self.pixel_grid = np.vstack((x, y)).T
-
-  def set_folder(self, folder:str)->None:
-    self.folder = folder
 
   def reset(self):
     # Clear sensor objects
@@ -289,6 +279,8 @@ class CarlaEnv(gym.Env):
         self.camera_sensor_lis[i].listen(lambda data: get_camera_img1(data))
       if i==2:
         self.camera_sensor_lis[i].listen(lambda data: get_camera_img2(data))
+      if i==3:
+        self.camera_sensor_lis[i].listen(lambda data: get_camera_img3(data))
       
       def process_img_data(data):
         array = np.frombuffer(data.raw_data, dtype = np.dtype("uint8"))
@@ -306,6 +298,9 @@ class CarlaEnv(gym.Env):
       def get_camera_img2(data):
         self.camera_img_lis[2] = process_img_data(data)
 
+      def get_camera_img3(data):
+        self.camera_img_lis[3] = process_img_data(data)
+
     # Add semantic segmentation sensor
     self.semantic_sensor = self.world.spawn_actor(self.semantic_bp, self.semantic_trans, attach_to=self.ego)
     self.semantic_sensor.listen(lambda data: get_semantic_data(data))
@@ -314,6 +309,34 @@ class CarlaEnv(gym.Env):
     def get_semantic_data(data):
       data.convert(cc)
       self.semantic_img =  process_img_data(data)
+  
+    # Add IMU sensor
+    self.imu_sensor = self.world.spawn_actor(
+      self.imu_bp,
+      self.imu_transform,
+      attach_to=self.ego, 
+      attachment_type=carla.AttachmentType.Rigid)
+    
+    self.imu_sensor.listen(lambda data: get_imu_data(data))
+
+    def get_imu_data(data):
+      self.imu_data = {
+        "accelerometer.x": data.accelerometer.x, 
+        "accelerometer.y": data.accelerometer.y, 
+        "accelerometer.z": data.accelerometer.z, 
+        "gyroscope.x": data.gyroscope.x,
+        "gyroscope.y": data.gyroscope.y,
+        "gyroscope.z": data.gyroscope.z,
+        "compass": data.compass
+      }
+      # self.imu_data = np.array([
+      #   data.accelerometer.x, 
+      #   data.accelerometer.y, 
+      #   data.accelerometer.z, 
+      #   data.gyroscope.x,
+      #   data.gyroscope.y,
+      #   data.gyroscope.z,
+      #   data.compass])
 
     # Update timesteps3
     self.time_step=0
@@ -352,10 +375,10 @@ class CarlaEnv(gym.Env):
 
     if sel_traffic_light is not None:
         if sel_traffic_light.state == carla.libcarla.TrafficLightState.Red:
-          print('state', sel_traffic_light.state)
+          #print('state', sel_traffic_light.state)
           return 0
         if sel_traffic_light.state == carla.libcarla.TrafficLightState.Green:
-          print('state', sel_traffic_light.state)
+          #print('state', sel_traffic_light.state)
           return 1
     return 2  # no light
 
@@ -406,80 +429,7 @@ class CarlaEnv(gym.Env):
     self.time_step += 1
     self.total_step += 1
 
-    obs = self._get_obs()
-
-    self.save_state(obs, path_save=self.folder)
-      
-    return (obs, self._get_reward(), self._terminal(), copy.deepcopy(info))
-
-  def save_state(self, obs, path_save="/results"):
-    """ Save the state in the FordAV-like format. """
-
-    if not os.path.exists(path_save):
-      os.mkdir(path_save)
-
-    ts = int(time.time()*1000)  # timestep
-
-    # Save camera image
-    if 'camera' in obs:
-      path_save_camera = os.path.join(path_save, f"cam_front")
-      path_save_camera_resized = os.path.join(path_save, f"cam_front_resized_128")
-
-      if not os.path.exists(path_save_camera):
-        os.mkdir(path_save_camera)
-
-      if not os.path.exists(path_save_camera_resized):
-        os.mkdir(path_save_camera_resized)
-      
-      
-      imsave(os.path.join(path_save_camera, f"{ts}.png"), obs["camera"])
-
-      # Temp workaround
-      image = cv2.imread(os.path.join(path_save_camera, f"{ts}.png"))
-      image = cv2.resize(image, (128, 128), interpolation=cv2.INTER_NEAREST)
-
-      cv2.imwrite(os.path.join(path_save_camera_resized, f"{ts}.png"), image)
-
-    # Save semseg camera image
-    if 'semantic' in obs:
-      path_save_camera = os.path.join(path_save, f"cam_front_ss")
-      if not os.path.exists(path_save_camera):
-        os.mkdir(path_save_camera)
-      imsave(os.path.join(path_save_camera, f"{ts}.png"), obs["semantic"])
-
-    # Save lidar image
-    if 'lidar' in obs:
-      path_save_lidar= os.path.join(path_save, f"lidar")
-      if not os.path.exists(path_save_lidar):
-        os.mkdir(path_save_lidar)
-      imsave(os.path.join(path_save_lidar, f"{ts}.png"), obs["lidar"])
-
-    # Save lidar BEV image
-    if 'birdeye' in obs:
-      path_save_lidar= os.path.join(path_save, f"lidar_bev")
-      if not os.path.exists(path_save_lidar):
-        os.mkdir(path_save_lidar)
-      imsave(os.path.join(path_save_lidar, f"{ts}.png"), obs["birdeye"])
-
-    # Save IMU data
-    if 'imu' in obs:
-
-      # Temporary - for state
-      state_dict = {
-        "steer": obs['state'][0],
-        "delta_yaw": obs['state'][1],
-        "lspeed_lon": obs['state'][2],
-        "speed": obs['state'][3]
-      }
-      sensors_dict = obs['imu'].copy()
-      sensors_dict.update(state_dict)
-
-      path_save_imu = os.path.join(path_save, f"sensors")
-      if not os.path.exists(path_save_imu):
-        os.mkdir(path_save_imu)
-      with open(os.path.join(path_save_imu, f"{ts}.json"), 'w') as f:
-        json.dump(sensors_dict, f, indent=4)
-
+    return (self._get_obs(), self._get_reward(), self._terminal(), copy.deepcopy(info))
 
   def seed(self, seed=None):
     self.np_random, seed = seeding.np_random(seed)
@@ -513,7 +463,7 @@ class CarlaEnv(gym.Env):
     """
     pygame.init()
     self.display = pygame.display.set_mode(
-    (self.display_size * 3, self.display_size),
+    (self.display_size * 4, self.display_size),
     pygame.HWSURFACE | pygame.DOUBLEBUF)
 
     pixels_per_meter = self.display_size / self.obs_range
@@ -672,7 +622,9 @@ class CarlaEnv(gym.Env):
     point_cloud = []
     # Get point cloud data
     for location in self.lidar_data:
+      #point_cloud.append([location.x, location.y, -location.z])
       point_cloud.append([location.point.x, location.point.y, location.point.z])
+
     point_cloud = np.array(point_cloud)
     # Separate the 3D space to bins for point cloud, x and y is set according to self.lidar_bin,
     # and z is set to be two bins.
@@ -704,15 +656,20 @@ class CarlaEnv(gym.Env):
     ## Display camera image
     camera = resize(self.camera_img_lis[0], (self.obs_size, self.obs_size)) * 255
     camera_surface = rgb_to_display_surface(camera, self.display_size)
-    self.display.blit(camera_surface, (self.display_size * 1, 0))
+    self.display.blit(camera_surface, (self.display_size * 0, 0))
 
     camera1 = resize(self.camera_img_lis[1], (self.obs_size, self.obs_size)) * 255
     camera_surface = rgb_to_display_surface(camera1, self.display_size)
-    self.display.blit(camera_surface, (self.display_size * 0, 0))
+    self.display.blit(camera_surface, (self.display_size * 1, 0))
 
     camera2 = resize(self.camera_img_lis[2], (self.obs_size, self.obs_size)) * 255
     camera_surface = rgb_to_display_surface(camera2, self.display_size)
     self.display.blit(camera_surface, (self.display_size * 2, 0))
+
+    camera3 = resize(self.camera_img_lis[3], (self.obs_size, self.obs_size)) * 255
+    camera_surface = rgb_to_display_surface(camera3, self.display_size)
+    self.display.blit(camera_surface, (self.display_size * 3, 0))
+
 
     ## Display semantic image
     semantic = resize(self.semantic_img, (self.obs_size, self.obs_size)) * 255
@@ -785,15 +742,19 @@ class CarlaEnv(gym.Env):
     cont = self.ego.get_control()
     aux_state = np.array([cont.throttle, cont.steer, cont.brake, trafficlight])
 
+    imu = self.imu_data
+
     obs = {
-      'camera':camera.astype(np.uint8),
-      'camera_l': (resize(self.camera_img_lis[1], (self.obs_size, self.obs_size)) * 255).astype(np.uint8),
-      'camera_r': (resize(self.camera_img_lis[2], (self.obs_size, self.obs_size)) * 255).astype(np.uint8),
+      'camera_f':camera.astype(np.uint8),
+      'camera_sl': (resize(self.camera_img_lis[1], (self.obs_size, self.obs_size)) * 255).astype(np.uint8),
+      'camera_sr': (resize(self.camera_img_lis[2], (self.obs_size, self.obs_size)) * 255).astype(np.uint8),
+      'camera_r': (resize(self.camera_img_lis[3], (self.obs_size, self.obs_size)) * 255).astype(np.uint8),
       'semantic':semantic.astype(np.uint8),
       'lidar':lidar.astype(np.uint8),
       'birdeye':birdeye.astype(np.uint8),
       'state': state,
-      'aux_state': aux_state
+      'aux_state': aux_state,
+      'imu': imu
     }
 
     if self.pixor:
