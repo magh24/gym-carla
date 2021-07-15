@@ -132,13 +132,16 @@ class CarlaEnv(gym.Env):
     # self.camera_bp.set_attribute('sensor_tick', '0.02')
 
     ### additional cameras
-    self.numCameras = 3
+    self.numCameras = 5
     self.camera_trans_lis = [None] * self.numCameras 
     self.camera_bp_lis = [None] * self.numCameras 
     self.camera_img_lis = [None] * self.numCameras 
     transform_vals = [carla.Transform(carla.Location(x=1.5, z=1.7), carla.Rotation(yaw=0.0)),
-    carla.Transform(carla.Location(x=.60, y=-.89, z=.65), carla.Rotation(yaw= -60.0)),
-    carla.Transform(carla.Location(x=.60, y=.89, z=.65), carla.Rotation(yaw= 60.0))]
+      carla.Transform(carla.Location(x=.60, y=-.89, z=1.7), carla.Rotation(yaw=-90.0)),
+      carla.Transform(carla.Location(x=.60, y=.89, z=1.7), carla.Rotation(yaw=90.0)),
+      carla.Transform(carla.Location(x=1.5, z=1.7), carla.Rotation(yaw=0.0)), # small FOV camera
+      carla.Transform(carla.Location(x=-1.9, z=1.7), carla.Rotation(yaw=180.0)),
+    ]
     for i in range(self.numCameras ):
       self.camera_img_lis[i] = np.zeros((self.obs_size, self.obs_size, 3), dtype=np.uint8)
       self.camera_trans_lis[i] = transform_vals[i]
@@ -147,6 +150,8 @@ class CarlaEnv(gym.Env):
       self.camera_bp_lis[i].set_attribute('image_size_x', str(self.obs_size))
       self.camera_bp_lis[i].set_attribute('image_size_y', str(self.obs_size))
       self.camera_bp_lis[i].set_attribute('fov', '110')
+      if i==3: # small FOV 
+        self.camera_bp_lis[i].set_attribute('fov', '55')
       # Set the time in seconds between sensor captures
       self.camera_bp_lis[i].set_attribute('sensor_tick', '0.02')
 
@@ -274,6 +279,10 @@ class CarlaEnv(gym.Env):
         self.camera_sensor_lis[i].listen(lambda data: get_camera_img1(data))
       if i==2:
         self.camera_sensor_lis[i].listen(lambda data: get_camera_img2(data))
+      if i==3:
+        self.camera_sensor_lis[i].listen(lambda data: get_camera_img3(data))
+      if i==4:
+        self.camera_sensor_lis[i].listen(lambda data: get_camera_img4(data))
       
       def process_img_data(data):
         array = np.frombuffer(data.raw_data, dtype = np.dtype("uint8"))
@@ -290,6 +299,12 @@ class CarlaEnv(gym.Env):
 
       def get_camera_img2(data):
         self.camera_img_lis[2] = process_img_data(data)
+
+      def get_camera_img3(data):
+        self.camera_img_lis[3] = process_img_data(data)
+      
+      def get_camera_img4(data):
+        self.camera_img_lis[4] = process_img_data(data)
 
     # Add semantic segmentation sensor
     self.semantic_sensor = self.world.spawn_actor(self.semantic_bp, self.semantic_trans, attach_to=self.ego)
@@ -701,6 +716,8 @@ class CarlaEnv(gym.Env):
       'camera':camera.astype(np.uint8),
       'camera_l': (resize(self.camera_img_lis[1], (self.obs_size, self.obs_size)) * 255).astype(np.uint8),
       'camera_r': (resize(self.camera_img_lis[2], (self.obs_size, self.obs_size)) * 255).astype(np.uint8),
+      'camera_sFOV': (resize(self.camera_img_lis[3], (self.obs_size, self.obs_size)) * 255).astype(np.uint8),
+      'camera_b': (resize(self.camera_img_lis[4], (self.obs_size, self.obs_size)) * 255).astype(np.uint8),
       'semantic':semantic.astype(np.uint8),
       'lidar':lidar.astype(np.uint8),
       'birdeye':birdeye.astype(np.uint8),

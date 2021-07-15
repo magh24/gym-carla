@@ -31,7 +31,7 @@ def main():
     'port': 2000,  # connection port
     'town': 'Town03',  # which town to simulate
     'task_mode': 'random',  # mode of the task, [random, roundabout (only for Town03)]
-    'max_time_episode': 1000,  # maximum timesteps per episode
+    'max_time_episode': 215,  # maximum timesteps per episode
     'max_waypt': 12,  # maximum number of waypoints
     'obs_range': 32,  # observation range (meter)
     'lidar_bin': 0.125,  # bin size of lidar sensor (meter)
@@ -51,12 +51,13 @@ def main():
   for _ in range(15):  # wait for zoom
     env.step([2.0, 0.0])
 
-
+  episode = 0
   cnt = 0
-  keys = ['camera', 'camera_l', 'camera_r', 'semantic']
+  keys = ['camera', 'camera_l', 'camera_r', 'camera_sFOV', 'camera_b', 'semantic']
   for key in keys:
-    if not os.path.exists('data/' + key):
-      os.makedirs('data/'+key)
+    subdir = os.path.join("data/Log_"+str(episode), key)
+    if not os.path.exists(subdir):
+      os.makedirs(subdir)
 
   while True:
     action = [2.0, 0.0]
@@ -68,7 +69,8 @@ def main():
     cnt += 1
     for key in keys:
       im = Image.fromarray(obs[key])
-      im.save(os.path.join("data/", key, str(cnt)) + ".jpeg")
+      subdir = os.path.join("data/Log_"+str(episode), key)     
+      im.save(os.path.join(subdir, str(cnt)+".jpeg"))
 
     # states are
     # aux_state: throttle, steer, brake, trafficlight
@@ -82,6 +84,12 @@ def main():
       obs = env.reset()
       for _ in range(15):
         env.step(action)
+      
+      episode += 1
+      for key in keys:
+        subdir = os.path.join("data/Log_"+str(episode), key)
+        if not os.path.exists(subdir):
+          os.makedirs(subdir)
 
 
 
