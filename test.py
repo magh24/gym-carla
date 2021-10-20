@@ -62,6 +62,7 @@ def main():
   while True:
     action = [2.0, 0.0]
     obs,r,done,info = env.step(action)
+    print(info['commands'])
     print(cnt, '-', obs['aux_state'], obs['state'])
 
 

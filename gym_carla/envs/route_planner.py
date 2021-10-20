@@ -83,10 +83,10 @@ class RoutePlanner():
       self._waypoints_queue.append((next_waypoint, road_option))
 
   def run_step(self):
-    waypoints = self._get_waypoints()
+    waypoints, commands = self._get_waypoints()
     red_light, vehicle_front = self._get_hazard()
     # red_light = False
-    return waypoints, red_light, vehicle_front
+    return waypoints, commands, red_light, vehicle_front
 
   def _get_waypoints(self):
     """
@@ -110,9 +110,11 @@ class RoutePlanner():
         break
 
     waypoints=[]
+    commands = []
 
-    for i, (waypoint, _) in enumerate(self._waypoint_buffer):
+    for i, (waypoint, road_option) in enumerate(self._waypoint_buffer):
       waypoints.append([waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
+      commands.append(road_option.value)
 
     # current vehicle waypoint
     self._current_waypoint = self._map.get_waypoint(self._vehicle.get_location())
@@ -131,7 +133,7 @@ class RoutePlanner():
       for i in range(max_index - 1):
         self._waypoint_buffer.popleft()
 
-    return waypoints
+    return waypoints, commands
 
   def _get_hazard(self):
     # retrieve relevant elements for safe navigation, i.e.: traffic lights

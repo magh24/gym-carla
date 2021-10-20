@@ -324,7 +324,7 @@ class CarlaEnv(gym.Env):
     self.world.apply_settings(self.settings)
 
     self.routeplanner = RoutePlanner(self.ego, self.max_waypt)
-    self.waypoints, _, self.vehicle_front = self.routeplanner.run_step()
+    self.waypoints, self.commands, _, self.vehicle_front = self.routeplanner.run_step()
 
     # Set ego information for render
     self.birdeye_render.set_hero(self.ego, self.ego.id)
@@ -394,19 +394,22 @@ class CarlaEnv(gym.Env):
       self.walker_polygons.pop(0)
 
     # route planner
-    self.waypoints, _, self.vehicle_front = self.routeplanner.run_step()
+    self.waypoints, self.commands, _, self.vehicle_front = self.routeplanner.run_step()
 
     # state information
+    reward = self._get_reward()
     info = {
       'waypoints': self.waypoints,
-      'vehicle_front': self.vehicle_front
+      'vehicle_front': self.vehicle_front,
+      'commands':self.commands,
+      'reward': reward
     }
     
     # Update timesteps
     self.time_step += 1
     self.total_step += 1
 
-    return (self._get_obs(), self._get_reward(), self._terminal(), copy.deepcopy(info))
+    return (self._get_obs(), reward, self._terminal(), copy.deepcopy(info))
 
   def seed(self, seed=None):
     self.np_random, seed = seeding.np_random(seed)
